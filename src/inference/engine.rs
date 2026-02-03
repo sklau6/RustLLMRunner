@@ -70,12 +70,17 @@ impl InferenceEngine {
             let mut output = String::new();
             let mut n_cur = tokens.len() as i32;
             
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as u32;
+            
             for _ in 0..max_tokens {
                 let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
                 let mut candidates_data = LlamaTokenDataArray::from_iter(candidates, false);
                 
-                candidates_data.sample_temp(temperature);
-                let new_token = candidates_data.sample_token(&mut ctx);
+                candidates_data.sample_softmax(None);
+                let new_token = candidates_data.sample_token(seed);
                 
                 if model.is_eog_token(new_token) {
                     break;
@@ -129,29 +134,25 @@ impl InferenceEngine {
             
             let mut n_cur = tokens.len() as i32;
             let max_tokens = gen_config.max_tokens as i32;
-            let temperature = gen_config.temperature;
+            
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as u32;
             
             for _ in 0..max_tokens {
                 let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
                 let mut candidates_data = LlamaTokenDataArray::from_iter(candidates, false);
                 
-                candidates_data.sample_temp(temperature);
-                let new_token = candidates_data.sample_token(&mut ctx);
+                candidates_data.sample_softmax(None);
+                let new_token = candidates_data.sample_token(seed);
                 
                 if model.is_eog_token(new_token) {
                     break;
                 }
                 
                 let piece = model.token_to_str(new_token, llama_cpp_2::model::Special::Tokenize)?;
-                
-                let tx_clone = tx.clone();
-                let piece_clone = piece.clone();
-                let _ = std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async {
-                        let _ = tx_clone.send(Ok(piece_clone)).await;
-                    });
-                }).join();
+                let _ = tx.blocking_send(Ok(piece));
                 
                 batch.clear();
                 batch.add(new_token, n_cur, &[0], true)?;
