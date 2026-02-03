@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  rust-llm-runner:
+    build: .
+    ports:
+      - "11434:11434"
+    volumes:
+      - models:/root/.rust-llm-runner
+    environment:
+      - RUST_LOG=info
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  models:
