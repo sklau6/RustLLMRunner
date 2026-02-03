@@ -1,0 +1,1 @@
+cargo run --release -- run mlabonne/gemma-3-27b-it-abliterated-GGUF
