@@ -4,7 +4,6 @@ use axum::{
     Json,
     http::StatusCode,
 };
-use futures::stream::{self, Stream};
 use std::convert::Infallible;
 use std::sync::Arc;
 use chrono::Utc;
@@ -25,8 +24,9 @@ pub async fn chat_completions(
     let model_parts: Vec<&str> = req.model.split(':').collect();
     let name = model_parts[0];
     let tag = model_parts.get(1).unwrap_or(&"latest");
+    let safe_name = name.replace('/', "_").replace('\\', "_");
     
-    let engine = state.model_manager.load_model(name, tag).await
+    let engine = state.model_manager.load_model(&safe_name, tag).await
         .map_err(|e| (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse { error: e.to_string() })
@@ -147,8 +147,9 @@ pub async fn generate(
     let model_parts: Vec<&str> = req.model.split(':').collect();
     let name = model_parts[0];
     let tag = model_parts.get(1).unwrap_or(&"latest");
+    let safe_name = name.replace('/', "_").replace('\\', "_");
     
-    let engine = state.model_manager.load_model(name, tag).await
+    let engine = state.model_manager.load_model(&safe_name, tag).await
         .map_err(|e| (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse { error: e.to_string() })
@@ -323,8 +324,9 @@ pub async fn show_model(
     let model_parts: Vec<&str> = req.name.split(':').collect();
     let name = model_parts[0];
     let tag = model_parts.get(1).unwrap_or(&"latest");
+    let safe_name = name.replace('/', "_").replace('\\', "_");
     
-    let metadata = state.model_manager.get_metadata(name, tag)
+    let metadata = state.model_manager.get_metadata(&safe_name, tag)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: e.to_string() })
@@ -354,12 +356,166 @@ pub async fn delete_model(
     let model_parts: Vec<&str> = req.name.split(':').collect();
     let name = model_parts[0];
     let tag = model_parts.get(1).unwrap_or(&"latest");
+    let safe_name = name.replace('/', "_").replace('\\', "_");
     
-    state.model_manager.delete_metadata(name, tag)
+    state.model_manager.delete_metadata(&safe_name, tag)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: e.to_string() })
         ))?;
     
     Ok(StatusCode::OK)
+}
+
+pub async fn list_openai_models(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<OpenAIModelsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let models = state.model_manager.list_all_models()
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e.to_string() })
+        ))?;
+    
+    let model_list: Vec<OpenAIModel> = models.into_iter().map(|m| {
+        OpenAIModel {
+            id: format!("{}:{}", m.name, m.tag),
+            object: "model".to_string(),
+            created: m.created_at.timestamp(),
+            owned_by: "local".to_string(),
+        }
+    }).collect();
+    
+    Ok(Json(OpenAIModelsResponse {
+        object: "list".to_string(),
+        data: model_list,
+    }))
+}
+
+pub async fn ollama_chat(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OllamaChatRequest>,
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+    let model_parts: Vec<&str> = req.model.split(':').collect();
+    let name = model_parts[0];
+    let tag = model_parts.get(1).unwrap_or(&"latest");
+    
+    // Use safe name for lookup
+    let safe_name = name.replace('/', "_").replace('\\', "_");
+    
+    let engine = state.model_manager.load_model(&safe_name, tag).await
+        .map_err(|e| (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: e.to_string() })
+        ))?;
+    
+    let prompt = req.messages.iter()
+        .map(|m| format!("{}: {}", m.role, m.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    let options = req.options.unwrap_or(GenerateOptions {
+        temperature: Some(0.8),
+        top_p: Some(0.95),
+        top_k: Some(40),
+        repeat_penalty: Some(1.1),
+        num_predict: Some(2048),
+    });
+    
+    let gen_config = GenerationConfig {
+        temperature: options.temperature.unwrap_or(0.8),
+        top_p: options.top_p.unwrap_or(0.95),
+        top_k: options.top_k.unwrap_or(40),
+        repeat_penalty: options.repeat_penalty.unwrap_or(1.1),
+        max_tokens: options.num_predict.unwrap_or(2048),
+        stream: req.stream,
+        ..Default::default()
+    };
+    
+    if req.stream {
+        let mut rx = engine.generate_stream(GenerationRequest {
+            prompt,
+            config: gen_config,
+            context: None,
+        }).await.map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e.to_string() })
+        ))?;
+        
+        let model = req.model.clone();
+        let stream = async_stream::stream! {
+            while let Some(result) = rx.recv().await {
+                match result {
+                    Ok(text) => {
+                        let response = OllamaChatResponse {
+                            model: model.clone(),
+                            created_at: Utc::now(),
+                            message: OllamaChatMessage {
+                                role: "assistant".to_string(),
+                                content: text,
+                            },
+                            done: false,
+                            total_duration: None,
+                            load_duration: None,
+                            prompt_eval_count: None,
+                            eval_count: None,
+                        };
+                        
+                        let json = serde_json::to_string(&response).unwrap();
+                        yield Ok::<_, Infallible>(Event::default().data(json));
+                    }
+                    Err(_) => break,
+                }
+            }
+            
+            let final_response = OllamaChatResponse {
+                model,
+                created_at: Utc::now(),
+                message: OllamaChatMessage {
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                },
+                done: true,
+                total_duration: Some(0),
+                load_duration: Some(0),
+                prompt_eval_count: Some(0),
+                eval_count: Some(0),
+            };
+            
+            let json = serde_json::to_string(&final_response).unwrap();
+            yield Ok::<_, Infallible>(Event::default().data(json));
+        };
+        
+        Ok(Sse::new(stream).into_response())
+    } else {
+        let response = engine.generate(GenerationRequest {
+            prompt: prompt.clone(),
+            config: gen_config,
+            context: None,
+        }).await.map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e.to_string() })
+        ))?;
+        
+        let chat_response = OllamaChatResponse {
+            model: req.model,
+            created_at: Utc::now(),
+            message: OllamaChatMessage {
+                role: "assistant".to_string(),
+                content: response.text,
+            },
+            done: true,
+            total_duration: Some(0),
+            load_duration: Some(0),
+            prompt_eval_count: Some(prompt.split_whitespace().count()),
+            eval_count: Some(response.tokens_generated),
+        };
+        
+        Ok(Json(chat_response).into_response())
+    }
+}
+
+pub async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
 }

@@ -22,10 +22,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Serve {
-        #[arg(short, long, default_value = "127.0.0.1")]
-        host: String,
-        #[arg(short, long, default_value = "11434")]
-        port: u16,
+        #[arg(short, long)]
+        host: Option<String>,
+        #[arg(short, long)]
+        port: Option<u16>,
     },
     Pull {
         model: String,
@@ -47,10 +47,16 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file first
+    let _ = dotenvy::dotenv();
+    
+    // Load config to get settings
+    let config = config::Config::load()?;
+    
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rust_llm_runner=info,tower_http=debug".into()),
+                .unwrap_or_else(|_| format!("rust_llm_runner={},tower_http=debug", config.log_level).into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -59,6 +65,9 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Serve { host, port } => {
+            // Use CLI args if provided, otherwise fall back to .env/config
+            let host = host.unwrap_or(config.server_host);
+            let port = port.unwrap_or(config.server_port);
             tracing::info!("Starting server on {}:{}", host, port);
             api::server::start_server(&host, port).await?;
         }

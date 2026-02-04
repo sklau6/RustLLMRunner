@@ -15,10 +15,8 @@ hyper = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# GGUF and inference
-candle-core = "0.4"
-candle-nn = "0.4"
-candle-transformers = "0.4"
+# GGUF and inference - default features include Metal on macOS
+llama-cpp-2 = { version = "0.1", features = ["cuda"] }
 
 # Model downloading
 reqwest = { version = "0.11", features = ["stream", "json"] }
@@ -48,6 +46,7 @@ thiserror = "1.0"
 config = "0.14"
 toml = "0.8"
 dirs = "5.0"
+dotenvy = "0.15"
 
 # Database for model metadata
 sled = "0.34"
@@ -64,6 +63,12 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.27"
+
+[features]
+default = []
+cuda = ["llama-cpp-2/cuda"]
+metal = ["llama-cpp-2/metal"]
+vulkan = ["llama-cpp-2/vulkan"]
 
 [dev-dependencies]
 mockito = "1.2"

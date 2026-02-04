@@ -175,3 +175,57 @@ pub struct DeleteRequest {
 pub struct ErrorResponse {
     pub error: String,
 }
+
+// OpenAI /v1/models response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenAIModelsResponse {
+    pub object: String,
+    pub data: Vec<OpenAIModel>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenAIModel {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub owned_by: String,
+}
+
+// Ollama /api/chat request/response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OllamaChatRequest {
+    pub model: String,
+    pub messages: Vec<OllamaChatMessage>,
+    #[serde(default)]
+    pub stream: bool,
+    #[serde(default)]
+    pub options: Option<GenerateOptions>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OllamaChatResponse {
+    pub model: String,
+    pub created_at: DateTime<Utc>,
+    pub message: OllamaChatMessage,
+    pub done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_eval_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eval_count: Option<usize>,
+}
+
+// Ollama /api/version response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VersionResponse {
+    pub version: String,
+}

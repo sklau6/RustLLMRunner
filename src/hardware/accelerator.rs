@@ -62,7 +62,7 @@ impl Accelerator {
         self.accel_type
     }
     
-    pub fn get_device_count(&self) -> usize {
+    pub fn device_count(&self) -> usize {
         self.device_count
     }
     

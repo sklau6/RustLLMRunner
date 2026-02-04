@@ -14,12 +14,20 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .allow_headers(Any);
     
     Router::new()
+        // Root endpoint - Ollama compatible
+        .route("/", get(|| async { "Rust LLM Runner is running" }))
+        // OpenAI compatible endpoints
         .route("/v1/chat/completions", post(handlers::chat_completions))
+        .route("/v1/models", get(handlers::list_openai_models))
+        // Ollama compatible endpoints
         .route("/api/generate", post(handlers::generate))
+        .route("/api/chat", post(handlers::ollama_chat))
         .route("/api/tags", get(handlers::list_models))
         .route("/api/pull", post(handlers::pull_model))
         .route("/api/show", post(handlers::show_model))
         .route("/api/delete", delete(handlers::delete_model))
+        .route("/api/version", get(handlers::version))
+        // Health check
         .route("/health", get(|| async { "OK" }))
         .with_state(state)
         .layer(cors)
