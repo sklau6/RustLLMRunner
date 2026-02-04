@@ -1,1 +1,5 @@
-cargo run --release -- run mlabonne/gemma-3-27b-it-abliterated-GGUF
+# First pull the model
+cargo run --release -- pull gemma3:27b
+ 
+# Then run it
+cargo run --release -- run gemma3:27b
